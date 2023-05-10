@@ -1,5 +1,5 @@
 
-import re
+import re, sys
 from pprint import pprint
 
 TYPE_NUMBER = 0
@@ -33,6 +33,8 @@ type_json_format = {
     TYPE_RESERVED : "JSON_RESERVED",
     TYPE_UNKNOWN : "//无法识别, 请手动修改",
 }
+
+ARRAY_NUM_FLAG = "@ARRAY_NUM"
 
 class JsonReflect:
     def __init__(self, filename):
@@ -100,7 +102,7 @@ class JsonReflect:
         struct_name_list = [type_name] if type == 'struct' else []
         for type_n in [TYPE_STRUCT, TYPE_UNION]:
             type = 'struct' if type_n == TYPE_STRUCT else 'union'
-            type_names = [field_type for field_type, field_name in fields if self.GetType(field_type) == type_n]
+            type_names = [field_type for field_type, field_name, _ in fields if self.GetType(field_type) == type_n]
 
             for name in type_names:
                 content = self.GetBraceTypeContent(name, type)
@@ -111,19 +113,19 @@ class JsonReflect:
     def ExtractBraceTypeFields(self, type_name, type = 'struct'):
         content = self.GetBraceTypeContent(type_name, type)
         if not content: return []
-        field_regex = r"(\w+)\s+([\w\[\]]+);"
+        field_regex = r"(\w+)\s+([\w\[\]]+);(.*)"
         all_fields = re.findall(field_regex, content)
-        # [(field_type, field_name), (...)]
-        for field in all_fields:
-            field_type, field_name = f"{field[0]}", f"{field[1]}"
-            #print(f"Struct {type_name} has fields: {field_type}, {field_name}")
+        # [(field_type, field_name, field_comment), (...)]
+        #for field_type, field_name, field_comment in all_fields:
+        #    print(f"Struct {type_name} has fields: {field_type}, {field_name}, {field_comment}")
         return all_fields
 
     def SortStructName(self, struct_names):
         return [name for name in self.all_type_names['struct'] if name in struct_names]
 
-    def GetFieldNameAndArrayType(self, field_name):
+    def GetFieldNameAndArrayType(self, field_name, field_comment):
         array_type = TYPE_NOT_ARRAY
+        var_array_num = ""
         if "[" in field_name and "]" in field_name:
             if field_name.count("[") == 1 and field_name.count("]") == 1:
                 array_type = TYPE_ARRAY_1D
@@ -132,20 +134,26 @@ class JsonReflect:
             else:
                 print(f"Cannot check {field_name} is array or not, not support!")
             field_name = field_name.split("[")[0]
-        return (field_name, array_type)
+            match = re.search(r"\[%s\s*:\s*([^\]]+)\]" % ARRAY_NUM_FLAG, field_comment)
+            if match:
+                var_array_num = match.group(1)
+                #print(var_array_num)
+        return (field_name, array_type, var_array_num)
 
-    def UpdateFieldType(self, field_type, array_type, field_name):
+    def UpdateFieldType(self, field_type, array_type, field_name, var_array_num):
         if field_type == TYPE_NUMBER and field_name in ['rsv', 'rsvd', 'reserved', 'reserve']:
             field_type = TYPE_RESERVED
-        if field_type == TYPE_NUMBER and array_type == TYPE_ARRAY_1D:
-            field_type = TYPE_NUMBER_ARRAY
+        elif field_type == TYPE_NUMBER and array_type == TYPE_ARRAY_1D:
+            field_type = TYPE_VAR_NUMBER_ARRAY if var_array_num else TYPE_NUMBER_ARRAY
         elif field_type == TYPE_NUMBER and array_type == TYPE_ARRAY_2D:
             field_type = TYPE_NUMBER_2D_ARRAY
-        elif field_type == TYPE_STRUCT and array_type in [TYPE_ARRAY_1D, TYPE_ARRAY_2D]:
+        elif field_type == TYPE_STRUCT and array_type == TYPE_ARRAY_1D:
+            field_type = TYPE_VAR_STRUCT_ARRAY if var_array_num else TYPE_STRUCT_ARRAY
+        elif field_type == TYPE_STRUCT and array_type == TYPE_ARRAY_2D:
             field_type = TYPE_STRUCT_ARRAY
         return field_type
 
-    def FieldString(self, struct_name, field_type, field_type_name, field_name):
+    def FieldString(self, struct_name, field_type, field_type_name, field_name, var_array_num):
         if field_type in type_json_format:
             json_format = type_json_format[field_type]
             if json_format in ['JSON_STRUCT', 'JSON_STRUCT_ARRAY']:
@@ -153,11 +161,11 @@ class JsonReflect:
                 field_string = f"{json_format}({struct_name}, {field_name}, {reflect_name}),"
             elif json_format == 'JSON_VAR_STRUCT_ARRAY':
                 reflect_name = self.StructReflectName(field_type_name)
-                field_string = f"{json_format}({struct_name}, {field_name}, [array个数的指示变量名], {reflect_name}),       // 请手动修改"
+                field_string = f"{json_format}({struct_name}, {field_name}, {var_array_num}, {reflect_name}),"
             elif json_format == 'JSON_UNION':
                 field_string = f"{json_format}({struct_name}, {field_name}, [union的指示变量名],  (const JsonReflect *)[union的reflect]),      // 请手动修改"
             elif json_format == 'JSON_VAR_NUMBER_ARRAY':
-                field_string = f"{json_format}({struct_name}, {field_name}, [array个数的指示变量名]),       // 请手动修改"
+                field_string = f"{json_format}({struct_name}, {field_name}, {var_array_num}),"
             else:
                 field_string = f"{json_format}({struct_name}, {field_name}),"
         else:
@@ -175,19 +183,19 @@ class JsonReflect:
         var_name = self.StructReflectName(struct_name)
 
         content = f"static const JsonReflect {var_name}[] = {{\n"
-        for field_type, field_name in all_fields:
+        for field_type, field_name, field_comment in all_fields:
             type = self.GetType(field_type)
-            field_name, array_type = self.GetFieldNameAndArrayType(field_name)
-            type = self.UpdateFieldType(type, array_type, field_name)
-            json_string = self.FieldString(struct_name, type, field_type, field_name)
+            field_name, array_type, var_array_num = self.GetFieldNameAndArrayType(field_name, field_comment)
+            type = self.UpdateFieldType(type, array_type, field_name, var_array_num)
+            json_string = self.FieldString(struct_name, type, field_type, field_name, var_array_num)
             content += f"    {json_string}\n"
             if type == TYPE_RESERVED: content += "\n"
-            if type == TYPE_STRUCT_ARRAY:       # add a var struct option to select
-                json_string = self.FieldString(struct_name, TYPE_VAR_STRUCT_ARRAY, field_type, field_name)
-                content += f"    //{json_string}, 挑选使用固定的array还是var array\n"
-            if type == TYPE_NUMBER_ARRAY:       # add a var struct option to select
-                json_string = self.FieldString(struct_name, TYPE_VAR_NUMBER_ARRAY, field_type, field_name)
-                content += f"    //{json_string}, 挑选使用固定的array还是var array\n"
+            #if type == TYPE_STRUCT_ARRAY:       # add a var struct option to select
+            #    json_string = self.FieldString(struct_name, TYPE_VAR_STRUCT_ARRAY, field_type, field_name)
+            #    content += f"    //{json_string}, 挑选使用固定的array还是var array\n"
+            #if type == TYPE_NUMBER_ARRAY:       # add a var struct option to select
+            #    json_string = self.FieldString(struct_name, TYPE_VAR_NUMBER_ARRAY, field_type, field_name)
+            #    content += f"    //{json_string}, 挑选使用固定的array还是var array\n"
         content += "    JSON_END()\n};\n\n"
         #print(content)
         return (struct_name, var_name, content)
@@ -208,33 +216,16 @@ class JsonReflect:
                 file.write(content)
         print(f"Write file {filename} successfully!")
 
-if __name__ == "__main__":
-    reflect = JsonReflect("pdsch_msg.h")
-    contents = reflect.AnalyseStruct("NrPdschInfo")
-    reflect.WriteToFile(contents, "para.h")
-
 def print_usage():
-    print('To generate config file (*.py), Usage: python parser search.txt')
-    print('To parse timestamp file (*.log), Usage: python parser config.py emulator.log')
+    print("Usage: python json_reflect {input_file} {struct_name} {output_file}")
+    print("Example: python json_reflect pucch_msg.h PucParam pucch_para.h")
 
 if __name__ == '__main__':
-    # Usage: python parser search.txt
-    # Usage: python parser search.py emulator.log
-    if len(sys.argv) < 1:
+    # Usage: python json_reflect pucch_msg.h PucParam pucch_para.h
+    if len(sys.argv) < 4:
         print_usage()
-    elif len(sys.argv) == 2:
-        search_file = sys.argv[1]
-        if search_file.endswith('txt') and os.path.isfile(search_file):
-            parser = Parser()
-            config_file = parser.gen_config(search_file)
-        else:
-            print_usage()
-    elif len(sys.argv) == 3:
-        config_file, log_file = sys.argv[1], sys.argv[2]
-        if config_file.endswith('py') and os.path.isfile(config_file) and os.path.isfile(log_file):
-            parser = Parser()
-            parser_config = __import__(os.path.splitext(os.path.basename(config_file))[0])
-            parser.set_parser_config(parser_config.PARSER_CONFIG)
-            parser.parse(log_file)
-        else:
-            print_usage()
+    else:
+        input_file, struct_name, output_file = sys.argv[1], sys.argv[2], sys.argv[3]
+        reflect = JsonReflect(input_file)
+        contents = reflect.AnalyseStruct(struct_name)
+        reflect.WriteToFile(contents, output_file)

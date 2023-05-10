@@ -61,7 +61,7 @@ typedef struct
     uint8_t rsvd[2];
     uint8_t timeDomainOccIdx;   /* 时域OCC的索引值，取值[0,6] */
     uint8_t userNumPerOcc;      /* 每个OCC上复用的用户数，协议规定最多12个，实际最多6个，取值[1,6] */
-    Fmt1UEParam fmt1UEParam[MAX_USER_NUM_PER_OCC];/* 当前OCC上fmt1 UE参数 */
+    Fmt1UEParam fmt1UEParam[MAX_USER_NUM_PER_OCC];/* 当前OCC上fmt1 UE参数 */     // [@ARRAY_NUM: userNumPerOcc]
 }Fmt1ParamOcc;
 
 typedef struct
@@ -100,8 +100,8 @@ typedef struct
     bool    uciPart2Enable;
     uint8_t part1BlockNum;
     uint8_t part2BlockNum;
-    Fmt3UciLlrPos part1LlrPos[NR_MAX_PUCCH_3_BLOCK_NUM];
-    Fmt3UciLlrPos part2LlrPos[NR_MAX_PUCCH_3_BLOCK_NUM];
+    Fmt3UciLlrPos part1LlrPos[NR_MAX_PUCCH_3_BLOCK_NUM];    // [@ARRAY_NUM: part1BlockNum]
+    Fmt3UciLlrPos part2LlrPos[NR_MAX_PUCCH_3_BLOCK_NUM];    // [@ARRAY_NUM: part2BlockNum]
 
     uint32_t *scrambSeqAddr;    /* 加扰序列在DDR中的存放地址 */
     uint32_t *llrAddr[2];       /* DSP处理完的LLR数据的存放地址，供HAC取数进行译码，2代表2part */
@@ -144,7 +144,7 @@ typedef struct
     uint8_t rsvd;
 
     uint8_t hopNum;
-    PucHopParam hopParam[HOP_NUM];  /* 不跳频时，参数在数组0 */
+    PucHopParam hopParam[HOP_NUM];  /* 不跳频时，参数在数组0 */       // [@ARRAY_NUM: hopNum]
 
     /* 各format需要的参数 */
     PucFmtUnion formatxParam;
@@ -190,7 +190,7 @@ typedef struct
     PucFmt23AlgoParam fmt2AlgoParam;
     PucFmt23AlgoParam fmt3AlgoParam;
 
-    PucParam pucParam[MAX_PUCCH_NUM];   /* 所有PUCCH的参数 */
+    PucParam pucParam[MAX_PUCCH_NUM];   /* 所有PUCCH的参数 */  // [@ARRAY_NUM: pucchNum]
 }PucchPara;
 
 typedef struct
@@ -227,9 +227,9 @@ typedef struct
     uint8_t pucchFmt23Num;
     uint8_t rsv[2];
 
-    PucchFmt0Rpt pucchFmt0Rpt[MAX_PUCCH_FMT0_1_NUM];
-    PucchFmt1Rpt pucchFmt1Rpt[MAX_PUCCH_FMT0_1_NUM];
-    PucchFmt23Rpt pucchFmt23Rpt[MAX_PUCCH_FMT2_3_NUM];
+    PucchFmt0Rpt pucchFmt0Rpt[MAX_PUCCH_FMT0_1_NUM];        // [@ARRAY_NUM: pucchFmt0Num]
+    PucchFmt1Rpt pucchFmt1Rpt[MAX_PUCCH_FMT0_1_NUM];        // [@ARRAY_NUM: pucchFmt1Num]
+    PucchFmt23Rpt pucchFmt23Rpt[MAX_PUCCH_FMT2_3_NUM];      // [@ARRAY_NUM: pucchFmt23Num]
 }PucchRpt;
 
 #endif // NR_CTRL_DSP_PUCCH_MSG_H
