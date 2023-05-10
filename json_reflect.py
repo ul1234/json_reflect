@@ -35,7 +35,7 @@ type_json_format = {
 }
 
 class JsonReflect:
-    def __init__(self, filename = "test.c"):
+    def __init__(self, filename):
         with open(filename, "r", encoding = "utf-8") as file:
             self.contents = file.read()
 
@@ -110,6 +110,7 @@ class JsonReflect:
 
     def ExtractBraceTypeFields(self, type_name, type = 'struct'):
         content = self.GetBraceTypeContent(type_name, type)
+        if not content: return []
         field_regex = r"(\w+)\s+([\w\[\]]+);"
         all_fields = re.findall(field_regex, content)
         # [(field_type, field_name), (...)]
@@ -140,7 +141,7 @@ class JsonReflect:
             field_type = TYPE_NUMBER_ARRAY
         elif field_type == TYPE_NUMBER and array_type == TYPE_ARRAY_2D:
             field_type = TYPE_NUMBER_2D_ARRAY
-        elif field_type == TYPE_STRUCT and array_type == TYPE_ARRAY_1D:
+        elif field_type == TYPE_STRUCT and array_type in [TYPE_ARRAY_1D, TYPE_ARRAY_2D]:
             field_type = TYPE_STRUCT_ARRAY
         return field_type
 
@@ -149,10 +150,16 @@ class JsonReflect:
             json_format = type_json_format[field_type]
             if json_format in ['JSON_STRUCT', 'JSON_STRUCT_ARRAY']:
                 reflect_name = self.StructReflectName(field_type_name)
-                field_string = f"{json_format}({struct_name}, {field_name}, {reflect_name})"
+                field_string = f"{json_format}({struct_name}, {field_name}, {reflect_name}),"
+            elif json_format == 'JSON_VAR_STRUCT_ARRAY':
+                reflect_name = self.StructReflectName(field_type_name)
+                field_string = f"{json_format}({struct_name}, {field_name}, [array个数的指示变量名], {reflect_name}),       // 请手动修改"
+            elif json_format == 'JSON_UNION':
+                field_string = f"{json_format}({struct_name}, {field_name}, [union的指示变量名],  (const JsonReflect *)[union的reflect]),      // 请手动修改"
+            elif json_format == 'JSON_VAR_NUMBER_ARRAY':
+                field_string = f"{json_format}({struct_name}, {field_name}, [array个数的指示变量名]),       // 请手动修改"
             else:
-                field_string = f"{json_format}({struct_name}, {field_name})"
-
+                field_string = f"{json_format}({struct_name}, {field_name}),"
         else:
             print(f"Invalid field type: {struct_name} {field_type} {field_name}")
             field_string = f"//{field_type} 无法识别, 请手动调整"
@@ -173,24 +180,61 @@ class JsonReflect:
             field_name, array_type = self.GetFieldNameAndArrayType(field_name)
             type = self.UpdateFieldType(type, array_type, field_name)
             json_string = self.FieldString(struct_name, type, field_type, field_name)
-            content += f"    {json_string},\n"
+            content += f"    {json_string}\n"
             if type == TYPE_RESERVED: content += "\n"
-        content += "    JSON_END()\n};\n"
-        print(content)
+            if type == TYPE_STRUCT_ARRAY:       # add a var struct option to select
+                json_string = self.FieldString(struct_name, TYPE_VAR_STRUCT_ARRAY, field_type, field_name)
+                content += f"    //{json_string}, 挑选使用固定的array还是var array\n"
+            if type == TYPE_NUMBER_ARRAY:       # add a var struct option to select
+                json_string = self.FieldString(struct_name, TYPE_VAR_NUMBER_ARRAY, field_type, field_name)
+                content += f"    //{json_string}, 挑选使用固定的array还是var array\n"
+        content += "    JSON_END()\n};\n\n"
+        #print(content)
         return (struct_name, var_name, content)
 
     def AnalyseStruct(self, struct_name):
         struct_names = self.GetStructNameList(struct_name, 'struct')
         struct_names = self.SortStructName(struct_names)
-        pprint(struct_names)
+        #pprint(struct_names)
 
         contents = []
         for name in struct_names:
             contents.append(self.GenStructReflect(name))
+        return contents
 
+    def WriteToFile(self, contents, filename):
+        with open(filename, "w", encoding = "utf-8") as file:
+            for struct_name, var_name, content in contents:
+                file.write(content)
+        print(f"Write file {filename} successfully!")
 
 if __name__ == "__main__":
-    reflect = JsonReflect()
-    reflect.AnalyseStruct("PucParam")
+    reflect = JsonReflect("pdsch_msg.h")
+    contents = reflect.AnalyseStruct("NrPdschInfo")
+    reflect.WriteToFile(contents, "para.h")
 
+def print_usage():
+    print('To generate config file (*.py), Usage: python parser search.txt')
+    print('To parse timestamp file (*.log), Usage: python parser config.py emulator.log')
 
+if __name__ == '__main__':
+    # Usage: python parser search.txt
+    # Usage: python parser search.py emulator.log
+    if len(sys.argv) < 1:
+        print_usage()
+    elif len(sys.argv) == 2:
+        search_file = sys.argv[1]
+        if search_file.endswith('txt') and os.path.isfile(search_file):
+            parser = Parser()
+            config_file = parser.gen_config(search_file)
+        else:
+            print_usage()
+    elif len(sys.argv) == 3:
+        config_file, log_file = sys.argv[1], sys.argv[2]
+        if config_file.endswith('py') and os.path.isfile(config_file) and os.path.isfile(log_file):
+            parser = Parser()
+            parser_config = __import__(os.path.splitext(os.path.basename(config_file))[0])
+            parser.set_parser_config(parser_config.PARSER_CONFIG)
+            parser.parse(log_file)
+        else:
+            print_usage()
