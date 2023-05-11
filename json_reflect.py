@@ -34,7 +34,12 @@ type_json_format = {
     TYPE_UNKNOWN : "//无法识别, 请手动修改",
 }
 
-ARRAY_NUM_FLAG = "@ARRAY_NUM"
+# 下面这个两个可以写在数组或者UNION字段后面的注释里, 指示对应的indicator (数组的实际大小, UNION对应的类型)
+# 比如
+# int8_t arrayNum; 
+# int8_t array[10];      // [@ARRAY_NUM: arrayNum]
+ARRAY_NUM_FLAG = "ARRAY_NUM"
+UNION_INDICATOR_FLAG = "UNION_INDICATOR"
 
 class JsonReflect:
     def __init__(self, filename):
@@ -123,9 +128,8 @@ class JsonReflect:
     def SortStructName(self, struct_names):
         return [name for name in self.all_type_names['struct'] if name in struct_names]
 
-    def GetFieldNameAndArrayType(self, field_name, field_comment):
+    def GetFieldNameAndArrayType(self, field_name):
         array_type = TYPE_NOT_ARRAY
-        var_array_num = ""
         if "[" in field_name and "]" in field_name:
             if field_name.count("[") == 1 and field_name.count("]") == 1:
                 array_type = TYPE_ARRAY_1D
@@ -134,26 +138,32 @@ class JsonReflect:
             else:
                 print(f"Cannot check {field_name} is array or not, not support!")
             field_name = field_name.split("[")[0]
-            match = re.search(r"\[%s\s*:\s*([^\]]+)\]" % ARRAY_NUM_FLAG, field_comment)
-            if match:
-                var_array_num = match.group(1)
-                #print(var_array_num)
-        return (field_name, array_type, var_array_num)
+        return (field_name, array_type)
 
-    def UpdateFieldType(self, field_type, array_type, field_name, var_array_num):
+    def GetIndicator(self, field_comment):
+        indicator = {}
+        for flag in [ARRAY_NUM_FLAG, UNION_INDICATOR_FLAG]:
+            match = re.search(r"\[@%s\s*:\s*([^\]]+)\]" % flag, field_comment)
+            if match:
+                indicator[flag] = match.group(1)
+                #print(indicator[flag])
+        # indicator[ARRAY_NUM_FLAG], indicator[UNION_INDICATOR_FLAG]
+        return indicator
+                
+    def UpdateFieldType(self, field_type, array_type, field_name, indicator):
         if field_type == TYPE_NUMBER and field_name in ['rsv', 'rsvd', 'reserved', 'reserve']:
             field_type = TYPE_RESERVED
         elif field_type == TYPE_NUMBER and array_type == TYPE_ARRAY_1D:
-            field_type = TYPE_VAR_NUMBER_ARRAY if var_array_num else TYPE_NUMBER_ARRAY
+            field_type = TYPE_VAR_NUMBER_ARRAY if ARRAY_NUM_FLAG in indicator else TYPE_NUMBER_ARRAY
         elif field_type == TYPE_NUMBER and array_type == TYPE_ARRAY_2D:
             field_type = TYPE_NUMBER_2D_ARRAY
         elif field_type == TYPE_STRUCT and array_type == TYPE_ARRAY_1D:
-            field_type = TYPE_VAR_STRUCT_ARRAY if var_array_num else TYPE_STRUCT_ARRAY
+            field_type = TYPE_VAR_STRUCT_ARRAY if ARRAY_NUM_FLAG in indicator else TYPE_STRUCT_ARRAY
         elif field_type == TYPE_STRUCT and array_type == TYPE_ARRAY_2D:
             field_type = TYPE_STRUCT_ARRAY
         return field_type
 
-    def FieldString(self, struct_name, field_type, field_type_name, field_name, var_array_num):
+    def FieldString(self, struct_name, field_type, field_type_name, field_name, indicator):
         if field_type in type_json_format:
             json_format = type_json_format[field_type]
             if json_format in ['JSON_STRUCT', 'JSON_STRUCT_ARRAY']:
@@ -161,10 +171,13 @@ class JsonReflect:
                 field_string = f"{json_format}({struct_name}, {field_name}, {reflect_name}),"
             elif json_format == 'JSON_VAR_STRUCT_ARRAY':
                 reflect_name = self.StructReflectName(field_type_name)
+                var_array_num = indicator[ARRAY_NUM_FLAG]
                 field_string = f"{json_format}({struct_name}, {field_name}, {var_array_num}, {reflect_name}),"
             elif json_format == 'JSON_UNION':
-                field_string = f"{json_format}({struct_name}, {field_name}, [union的指示变量名],  (const JsonReflect *)[union的reflect]),      // 请手动修改"
+                var_union_indicator = indicator[UNION_INDICATOR_FLAG]
+                field_string = f"{json_format}({struct_name}, {field_name}, {var_union_indicator}, (const JsonReflect *)[union的reflect]),      // 请手动修改"
             elif json_format == 'JSON_VAR_NUMBER_ARRAY':
+                var_array_num = indicator[ARRAY_NUM_FLAG]
                 field_string = f"{json_format}({struct_name}, {field_name}, {var_array_num}),"
             else:
                 field_string = f"{json_format}({struct_name}, {field_name}),"
@@ -185,17 +198,12 @@ class JsonReflect:
         content = f"static const JsonReflect {var_name}[] = {{\n"
         for field_type, field_name, field_comment in all_fields:
             type = self.GetType(field_type)
-            field_name, array_type, var_array_num = self.GetFieldNameAndArrayType(field_name, field_comment)
-            type = self.UpdateFieldType(type, array_type, field_name, var_array_num)
-            json_string = self.FieldString(struct_name, type, field_type, field_name, var_array_num)
+            field_name, array_type = self.GetFieldNameAndArrayType(field_name)
+            indicator = self.GetIndicator(field_comment)
+            type = self.UpdateFieldType(type, array_type, field_name, indicator)
+            json_string = self.FieldString(struct_name, type, field_type, field_name, indicator)
             content += f"    {json_string}\n"
             if type == TYPE_RESERVED: content += "\n"
-            #if type == TYPE_STRUCT_ARRAY:       # add a var struct option to select
-            #    json_string = self.FieldString(struct_name, TYPE_VAR_STRUCT_ARRAY, field_type, field_name)
-            #    content += f"    //{json_string}, 挑选使用固定的array还是var array\n"
-            #if type == TYPE_NUMBER_ARRAY:       # add a var struct option to select
-            #    json_string = self.FieldString(struct_name, TYPE_VAR_NUMBER_ARRAY, field_type, field_name)
-            #    content += f"    //{json_string}, 挑选使用固定的array还是var array\n"
         content += "    JSON_END()\n};\n\n"
         #print(content)
         return (struct_name, var_name, content)

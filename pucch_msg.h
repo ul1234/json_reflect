@@ -147,7 +147,7 @@ typedef struct
     PucHopParam hopParam[HOP_NUM];  /* 不跳频时，参数在数组0 */       // [@ARRAY_NUM: hopNum]
 
     /* 各format需要的参数 */
-    PucFmtUnion formatxParam;
+    PucFmtUnion formatxParam;       // [@UNION_INDICATOR: pucFormat]
 }PucParam;
 
 typedef struct

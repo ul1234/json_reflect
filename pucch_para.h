@@ -82,7 +82,7 @@ static const JsonReflect pucParamReflect[] = {
 
     JSON_NUMBER(PucParam, hopNum),
     JSON_VAR_STRUCT_ARRAY(PucParam, hopParam, hopNum, pucHopParamReflect),
-    JSON_UNION(PucParam, formatxParam, [union的指示变量名],  (const JsonReflect *)[union的reflect]),      // 请手动修改
+    JSON_UNION(PucParam, formatxParam, pucFormat, (const JsonReflect *)[union的reflect]),      // 请手动修改
     JSON_END()
 };
 
